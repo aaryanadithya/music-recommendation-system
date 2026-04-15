@@ -1,0 +1,261 @@
+{% extends 'base.html' %}
+
+{% block title %}Voice Music Player{% endblock %}
+
+{% block content %}
+<div class="container">
+    <h1>🎵 Voice Music Player</h1>
+    
+    <div class="voice-control">
+        <button class="mic-button" id="micBtn">🎤</button>
+        <div class="status" id="status">Click the mic and say "Play sad song"</div>
+    </div>
+
+    <div class="player-section" id="playerSection">
+        <div class="current-song" id="currentSong">
+            <h3 id="songTitle">No song playing</h3>
+            <p id="songArtist">-</p>
+        </div>
+
+        <div class="controls">
+            <button class="control-btn" id="prevBtn" title="Previous">⏮</button>
+            <button class="control-btn" id="playPauseBtn" title="Play/Pause">▶️</button>
+            <button class="control-btn" id="nextBtn" title="Next">⏭</button>
+        </div>
+
+        <div class="progress-bar" id="progressBar">
+            <div class="progress" id="progress"></div>
+        </div>
+
+        <div class="time-info">
+            <span id="currentTime">0:00</span>
+            <span id="duration">0:00</span>
+        </div>
+
+        <div class="volume-control">
+            <span class="volume-icon">🔊</span>
+            <input type="range" id="volumeSlider" class="volume-slider" min="0" max="100" value="70">
+        </div>
+
+        <div class="playlist" id="playlist"></div>
+    </div>
+
+    <audio id="audioPlayer"></audio>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+    const micBtn = document.getElementById('micBtn');
+    const status = document.getElementById('status');
+    const playerSection = document.getElementById('playerSection');
+    const audioPlayer = document.getElementById('audioPlayer');
+    const playPauseBtn = document.getElementById('playPauseBtn');
+    const prevBtn = document.getElementById('prevBtn');
+    const nextBtn = document.getElementById('nextBtn');
+    const progress = document.getElementById('progress');
+    const progressBar = document.getElementById('progressBar');
+    const playlist = document.getElementById('playlist');
+    const songTitle = document.getElementById('songTitle');
+    const songArtist = document.getElementById('songArtist');
+    const currentTimeEl = document.getElementById('currentTime');
+    const durationEl = document.getElementById('duration');
+    const volumeSlider = document.getElementById('volumeSlider');
+
+    let currentSongs = [];
+    let currentIndex = 0;
+    let isPlaying = false;
+
+    audioPlayer.volume = 0.7;
+
+    const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+    
+    if (!SpeechRecognition) {
+        status.textContent = 'Speech recognition not supported. Use Chrome or Edge.';
+    }
+
+    const recognition = SpeechRecognition ? new SpeechRecognition() : null;
+    
+    if (recognition) {
+        recognition.continuous = false;
+        recognition.lang = 'en-US';
+        recognition.interimResults = false;
+
+        recognition.onstart = () => {
+            micBtn.classList.add('listening');
+            status.textContent = 'Listening... Speak now!';
+        };
+
+        recognition.onresult = (event) => {
+            const transcript = event.results[0][0].transcript.toLowerCase();
+            status.textContent = `You said: "${transcript}"`;
+            processVoiceCommand(transcript);
+        };
+
+        recognition.onerror = (event) => {
+            status.textContent = 'Error occurred. Try again.';
+            micBtn.classList.remove('listening');
+        };
+
+        recognition.onend = () => {
+            micBtn.classList.remove('listening');
+        };
+    }
+
+    micBtn.addEventListener('click', () => {
+        if (recognition) {
+            recognition.start();
+        }
+    });
+
+    function processVoiceCommand(command) {
+        const moodKeywords = {
+            'sad': 'sad',
+            'happy': 'happy',
+            'energetic': 'energetic',
+            'energy': 'energetic',
+            'calm': 'calm',
+            'relax': 'calm',
+            'romantic': 'romantic',
+            'love': 'romantic'
+        };
+
+        let detectedMood = null;
+        for (const [keyword, mood] of Object.entries(moodKeywords)) {
+            if (command.includes(keyword)) {
+                detectedMood = mood;
+                break;
+            }
+        }
+
+        if (detectedMood) {
+            searchSongs(detectedMood);
+        } else {
+            status.textContent = 'Command not recognized. Try "play sad song"';
+        }
+    }
+
+    async function searchSongs(mood) {
+        try {
+            status.textContent = `Searching for ${mood} songs...`;
+            
+            const response = await fetch('/api/search/', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify({ mood: mood })
+            });
+
+            const data = await response.json();
+            
+            if (data.songs && data.songs.length > 0) {
+                currentSongs = data.songs;
+                currentIndex = 0;
+                displayPlaylist();
+                playSong(0);
+                playerSection.classList.add('active');
+                status.textContent = `Found ${data.songs.length} ${mood} songs`;
+            } else {
+                status.textContent = `No ${mood} songs found`;
+            }
+        } catch (error) {
+            status.textContent = 'Error fetching songs';
+        }
+    }
+
+    function displayPlaylist() {
+        playlist.innerHTML = '';
+        currentSongs.forEach((song, index) => {
+            const songItem = document.createElement('div');
+            songItem.className = 'song-item';
+            if (index === currentIndex) songItem.classList.add('active');
+            songItem.innerHTML = `
+                <div class="song-info">
+                    <h4>${song.title}</h4>
+                    <p>${song.artist}</p>
+                </div>
+                <span class="mood-badge">${song.mood}</span>
+            `;
+            songItem.addEventListener('click', () => playSong(index));
+            playlist.appendChild(songItem);
+        });
+    }
+
+    function playSong(index) {
+        if (index >= 0 && index < currentSongs.length) {
+            currentIndex = index;
+            const song = currentSongs[index];
+            if (song.audio_url) {
+                audioPlayer.src = song.audio_url;
+                audioPlayer.play();
+                isPlaying = true;
+                playPauseBtn.textContent = '⏸';
+                songTitle.textContent = song.title;
+                songArtist.textContent = song.artist;
+                updatePlaylistActive();
+            }
+        }
+    }
+
+    function updatePlaylistActive() {
+        const items = playlist.querySelectorAll('.song-item');
+        items.forEach((item, idx) => {
+            item.classList.toggle('active', idx === currentIndex);
+        });
+    }
+
+    function formatTime(seconds) {
+        const mins = Math.floor(seconds / 60);
+        const secs = Math.floor(seconds % 60);
+        return `${mins}:${secs.toString().padStart(2, '0')}`;
+    }
+
+    playPauseBtn.addEventListener('click', () => {
+        if (isPlaying) {
+            audioPlayer.pause();
+            playPauseBtn.textContent = '▶️';
+            isPlaying = false;
+        } else {
+            audioPlayer.play();
+            playPauseBtn.textContent = '⏸';
+            isPlaying = true;
+        }
+    });
+
+    prevBtn.addEventListener('click', () => {
+        if (currentIndex > 0) playSong(currentIndex - 1);
+    });
+
+    nextBtn.addEventListener('click', () => {
+        if (currentIndex < currentSongs.length - 1) playSong(currentIndex + 1);
+    });
+
+    progressBar.addEventListener('click', (e) => {
+        const rect = progressBar.getBoundingClientRect();
+        const percent = (e.clientX - rect.left) / rect.width;
+        audioPlayer.currentTime = percent * audioPlayer.duration;
+    });
+
+    volumeSlider.addEventListener('input', (e) => {
+        audioPlayer.volume = e.target.value / 100;
+    });
+
+    audioPlayer.addEventListener('timeupdate', () => {
+        if (audioPlayer.duration) {
+            progress.style.width = (audioPlayer.currentTime / audioPlayer.duration * 100) + '%';
+            currentTimeEl.textContent = formatTime(audioPlayer.currentTime);
+            durationEl.textContent = formatTime(audioPlayer.duration);
+        }
+    });
+
+    audioPlayer.addEventListener('ended', () => {
+        if (currentIndex < currentSongs.length - 1) {
+            playSong(currentIndex + 1);
+        } else {
+            isPlaying = false;
+            playPauseBtn.textContent = '▶️';
+        }
+    });
+</script>
+{% endblock %}
